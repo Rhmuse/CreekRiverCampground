@@ -33,29 +33,84 @@ if (app.Environment.IsDevelopment())
 
 app.UseHttpsRedirection();
 
-var summaries = new[]
+app.MapGet("/api/campsites", (CreekRiverDbContext db) =>
 {
-    "Freezing", "Bracing", "Chilly", "Cool", "Mild", "Warm", "Balmy", "Hot", "Sweltering", "Scorching"
-};
+    return db.Campsites.ToList();
+});
 
-app.MapGet("/weatherforecast", () =>
+app.MapGet("/api/campsites/{id}", (CreekRiverDbContext db, int id) =>
 {
-    var forecast = Enumerable.Range(1, 5).Select(index =>
-        new WeatherForecast
-        (
-            DateOnly.FromDateTime(DateTime.Now.AddDays(index)),
-            Random.Shared.Next(-20, 55),
-            summaries[Random.Shared.Next(summaries.Length)]
-        ))
-        .ToArray();
-    return forecast;
-})
-.WithName("GetWeatherForecast")
-.WithOpenApi();
+    try
+    {
+        return Results.Ok(db.Campsites.Include(c => c.CampsiteType).Single(c => c.Id == id));
+    }
+    catch
+    {
+        return Results.NotFound();
+    }
+});
+
+app.MapPost("/api/campsites", (CreekRiverDbContext db, Campsite campsite) =>
+{
+    db.Campsites.Add(campsite);
+    db.SaveChanges();
+    return Results.Created($"/api/campsites/{campsite.Id}", campsite);
+});
+
+app.MapDelete("/api/campsites/{id}", (CreekRiverDbContext db, int id) =>
+{
+    Campsite campsite = db.Campsites.SingleOrDefault(campsite => campsite.Id == id);
+    if (campsite == null)
+    {
+        return Results.NotFound();
+    }
+    db.Campsites.Remove(campsite);
+    db.SaveChanges();
+    return Results.NoContent();
+});
+
+app.MapPut("/api/campsites/{id}", (CreekRiverDbContext db, int id, Campsite campsite) =>
+{
+    Campsite campsiteToUpdate = db.Campsites.SingleOrDefault(campsite => campsite.Id == id);
+    if (campsiteToUpdate == null)
+    {
+        return Results.NotFound();
+    }
+    campsiteToUpdate.Nickname = campsite.Nickname;
+    campsiteToUpdate.CampsiteTypeId = campsite.CampsiteTypeId;
+    campsiteToUpdate.ImageUrl = campsite.ImageUrl;
+
+    db.SaveChanges();
+    return Results.NoContent();
+});
+
+app.MapGet("/api/reservations", (CreekRiverDbContext db) =>
+{
+    return db.Reservations
+        .Include(r => r.UserProfile)
+        .Include(r => r.Campsite)
+        .ThenInclude(c => c.CampsiteType)
+        .OrderBy(res => res.CheckinDate)
+        .ToList();
+});
+
+app.MapPost("/api/reservations", (CreekRiverDbContext db, Reservation newRes) =>
+{
+    if (newRes.CheckoutDate <= newRes.CheckinDate)
+    {
+        return Results.BadRequest("Reservation checkout must be at least one day after checkin");
+    }
+
+    try
+    {
+        db.Reservations.Add(newRes);
+        db.SaveChanges();
+        return Results.Created($"/api/reservations/{newRes.Id}", newRes);
+    }
+    catch (DbUpdateException)
+    {
+        return Results.BadRequest("Invalid data submitted");
+    }
+});
 
 app.Run();
-
-record WeatherForecast(DateOnly Date, int TemperatureC, string? Summary)
-{
-    public int TemperatureF => 32 + (int)(TemperatureC / 0.5556);
-}
